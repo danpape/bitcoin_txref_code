@@ -41,36 +41,40 @@ static const char TXREF_BECH32_HRP_TESTNET[] = "txtest";
  *                      (ONLY 5bit magic (0x0 to 0x7) are supported for now)
  *       block_height :  The block height to encode
  *       tx_pos       :  The tx position to encode
+ *       utxo_index   :  The index of the UTXO to encode
  *       non_standard :  If set to 1, the limits for height and txpos are 0x3FFFFFF (height)
  *                       and 0x3FFFF (pos) and, the output will be 2 chars longer
  *  Returns 1 if successful.
  */
-int btc_txref_encode(
+int btc_txrefext_encode(
     char *output,
     const char *hrp,
     const char magic,
     int block_height,
     int tx_pos,
+    int utxo_index,
     int non_standard
 );
 
 /** Decodes a transaction reference
  *
  *  In:  txref_id      :  Pointer to tx-ref encoded null-terminated Bech32 string.
- *  Out: *hrp          :  Human readabble part, make sure the buffer you pass in is
+ *  Out: *hrp          :  Human readable part, make sure the buffer you pass in is
                           at least the size of strlen(txref_id)
  *       *magic        :  5bit magic (as char) that will contain the used magic during encoding
  *                        (ONLY 5bit magic (0x0 to 0x7) are supported for now)
  *       *block_height :  Pointer to integer the will be updated with the decoded block height
  *       *tx_pos       :  Pointer to integer the will be updated with the decoded tx position
+ *       *utxo_index       :  Pointer to integer the will be updated with the decoded tx position
  *  Returns 1 if successful.
  */
-int btc_txref_decode(
+int btc_txrefext_decode(
     const char *txref_id,
     char *hrp,
     char *magic,
     int *block_height,
-    int *tx_pos
+    int *tx_pos,
+    int *utxo_index
 );
 
 #endif // _BTC_TXREF_CODE_H_

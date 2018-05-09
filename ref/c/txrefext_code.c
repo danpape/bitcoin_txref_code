@@ -27,24 +27,25 @@
 
 static const unsigned int TXREF_LEN_WITHOUT_HRP = 15;
 
-int btc_txref_encode(
+int btc_txrefext_encode(
     char *output,
     const char *hrp,
     const char magic,
     int block_height,
     int tx_pos,
+    int utxo_index,
     int non_standard
 ) {
     int res;
     /* Bech32 requires a array of 5bit chunks */
-    uint8_t short_id[10] = {0};
+    uint8_t short_id[13] = {0};
     size_t olen;
 
     /* ensure we stay in boundaries */
-    if ( 
-          (non_standard == 0 && (block_height > 0x1FFFFF || tx_pos > 0x1FFF || magic > 0x1F))
+    if (
+          (non_standard == 0 && (block_height > 0x1FFFFF || tx_pos > 0x1FFF || utxo_index > 0x1FFF || magic > 0x1F))
           ||
-          (non_standard == 1 && (block_height > 0x3FFFFFF || tx_pos > 0x3FFFF || magic > 0x1F))
+          (non_standard == 1 && (block_height > 0x3FFFFFF || tx_pos > 0x3FFFF || utxo_index > 0x1FFF || magic > 0x1F))
        ) {
         return -1;
     }
@@ -64,6 +65,12 @@ int btc_txref_encode(
       short_id[5] |= ((tx_pos & 0x7) << 2);
       short_id[6] |= ((tx_pos & 0xF8) >> 3);
       short_id[7] |= ((tx_pos & 0x1F00) >> 8);
+      short_id[8] |= ((utxo_index & 0x1F));
+      short_id[9] |= ((utxo_index & 0x3E0) >> 5);
+      short_id[10] |= ((utxo_index & 0x1C00) >> 10);
+      short_id[10] &= ~(1 << 4); // two bits leftover for future expansion
+      short_id[10] &= ~(1 << 5);
+
     }
     else {
       // use extended blockheight (up to 0x3FFFFFF)
@@ -75,40 +82,47 @@ int btc_txref_encode(
       short_id[7] |= ((tx_pos & 0xF8) >> 3);
       short_id[8] |= ((tx_pos & 0x1F00) >> 8);
       short_id[9] |= ((tx_pos & 0x3E000) >> 13);
+      short_id[10] |= ((utxo_index & 0x1F));
+      short_id[11] |= ((utxo_index & 0x3E0) >> 5);
+      short_id[12] |= ((utxo_index & 0x1C00) >> 10);
+      short_id[12] &= ~(1 << 4); // clear - two bits leftover for future expansion
+      short_id[12] &= ~(1 << 5);
+
     }
 
     /* Bech32 encode the 8x5bit packages */
     const char *hrptouse = (hrp != NULL ? hrp : TXREF_BECH32_HRP_MAINNET);
     int hrplen = strlen(hrptouse);
-    res = bech32_encode(output, hrptouse, short_id, (non_standard == 1 ? 10 : 8));
+    res = bech32_encode(output, hrptouse, short_id, (non_standard == 1 ? 13 : 11));
     /* add the dashes */
     olen = strlen(output);
     if (non_standard == 0) {
-      memcpy(output+olen+2, output+olen-2, 2); //including 0 byte
+      memcpy(output+olen-1, output+olen-5, 5); //including 0 byte
       output[olen+4] = 0;
-      memcpy(output+olen-3, output+olen-6, 4);
-      memcpy(output+olen-8, output+olen-10, 4);
-      memcpy(output+olen-13, output+olen-14, 4);
+      memcpy(output+olen-6, output+olen-9, 4);
+      memcpy(output+olen-11, output+olen-13, 4);
+      memcpy(output+olen-16, output+olen-17, 4);
       output[1+hrplen] = '-'; output[6+hrplen] = '-'; output[11+hrplen] = '-'; output[16+hrplen] = '-';
     }
     else {
       // use 16 char encoding (test networks)
-      memcpy(output+olen, output+olen-4, 4); //including 0 byte
+      memcpy(output+olen-3, output+olen-7, 7); //including 0 byte
       output[olen+4] = 0;
-      memcpy(output+olen-5, output+olen-8, 4);
-      memcpy(output+olen-10, output+olen-12, 4);
-      memcpy(output+olen-15, output+olen-16, 4);
+      memcpy(output+olen-8, output+olen-11, 4);
+      memcpy(output+olen-13, output+olen-15, 4);
+      memcpy(output+olen-18, output+olen-19, 4);
       output[1+hrplen] = '-'; output[6+hrplen] = '-'; output[11+hrplen] = '-'; output[16+hrplen] = '-';
     }
     return res;
 }
 
-int btc_txref_decode(
+int btc_txrefext_decode(
     const char *txref_id,
     char *hrp,
     char *magic,
     int *block_height,
-    int *tx_pos
+    int *tx_pos,
+    int *utxo_index
 ) {
     unsigned int i;
     size_t outlen = 0;
@@ -130,8 +144,8 @@ int btc_txref_decode(
 
     /* Bech32 decode */
     res = bech32_decode(hrp, buf, &outlen, txref_id_no_d);
-    /* ensure we have 8x5bit or 10x5bit (test-networks) */
-    if (outlen != 8 && outlen != 10) {
+    /* ensure we have 11x5bit or 13x5bit (test-networks) */
+    if (outlen != 11 && outlen != 13) {
         return -1;
     }
     if (!res) {
@@ -146,13 +160,18 @@ int btc_txref_decode(
     *block_height |= (buf[2] << 4);
     *block_height |= (buf[3] << 9);
     *block_height |= (buf[4] << 14);
-    if (outlen == 8) {
+    if (outlen == 11) {
       *block_height |= ((buf[5] & 0x03) << 19);
 
       /* set the tx position */
       *tx_pos = ((buf[5] & 0x1C) >> 2);
       *tx_pos |= (buf[6] << 3);
       *tx_pos |= (buf[7] << 8);
+
+      /* set the utxo_index */
+      *utxo_index = buf[8];
+      *utxo_index |= (buf[9] << 5);
+      *utxo_index |= (buf[10] << 10);
     }
     else {
       /* use extended blockheight / txpos (test networks) */
@@ -164,6 +183,11 @@ int btc_txref_decode(
       *tx_pos |= (buf[7] << 3);
       *tx_pos |= (buf[8] << 8);
       *tx_pos |= (buf[9] << 13);
+
+      /* set the utxo_index */
+      *utxo_index = buf[10];
+      *utxo_index |= (buf[11] << 5);
+      *utxo_index |= (buf[12] << 10);
     }
 
     return 1;
